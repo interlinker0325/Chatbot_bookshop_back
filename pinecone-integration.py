@@ -5,6 +5,8 @@ from pinecone import Pinecone
 import os
 from dotenv import load_dotenv
 import uuid
+import re
+from datetime import datetime
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -13,7 +15,7 @@ pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 
 pc_index = pc.Index(host=os.getenv("PINECONE_INDEX_NAME"))
 
-with open('total_result.json', encoding='utf-8') as file:
+with open('cleaned_data.json', encoding='utf-8') as file:
     result_links = json.load(file)
 
 def get_embeddings(query):
@@ -41,26 +43,61 @@ if __name__ == "__main__":
     for index, book in enumerate(result_links):
         print(index)
         try:
-            title = book[0]["title"]
-            review = book[0]["review"]
-            price = book[0]["price"]
-            summary = book[0]["summary"]
-            author = book[1]["Autore:"]
-            publisher = book[2]["Editore:"] 
-            year = book[3]["Anno edizione:"]
-            publication_date = book[-3]["In commercio dal:"]
-            pages = book[-2]["Pagine:"]
-            EAN = book[-1]["EAN:"]
+            title = book.get["title", " "]
+
+            review = book.get["review", " "]
+            review_str = review.split(":")[1].split("\n")[0].strip() if ":" in review else "0"
+            review_num = int(review_str) if review_str.isdigit() else 0
+
+            price = book.get["price", " "]
+            price_str = price.split(" ")[0].strip().replace(",", ".") if price else "0.0"
+            price_num = float(price_str)
+            formatted_price = f"{price_num:.2f}"
+
+            summary = book["summary"]
+            author = book.get["Autore:", " "]
+            author_list = [name.strip() for name in author.split(",")] if author else []
+
+            publisher = book.get["Editore:", " "] 
+            publish_year = book.get["Anno edizione:", " "]
+
+            publication_date = book.get["In commercio dal:", ""]
+            month_mapping = {
+                "gennaio": "01",
+                "febbraio": "02",
+                "marzo": "03",
+                "aprile": "04",
+                "maggio": "05",
+                "giugno": "06",
+                "luglio": "07",
+                "agosto": "08",
+                "settembre": "09",
+                "ottobre": "10",
+                "novembre": "11",
+                "dicembre": "12"
+            }
+            try:
+                day, month, year = publication_date.split()
+                month_number = month_mapping[month]
+                formatted_date = f"{year}-{month_number}-{day.zfill(2)}"
+            except: 
+                formatted_date = "Unknown Date"
+
+            pages = book.get["Pagine:", " "] 
+            number_str = pages.split()[0] if pages else "0"
+            pages_num = int(number_str) if number_str.isdigit() else 0
+
+            EAN = book.get["EAN:", " "]
 
             metadata =  {
                 "title": title,
-                "author": author,
-                "review": review,
-                "price": price,
+                "author": author_list,
+                "review": review_num,
+                "price": formatted_price,
                 "publisher": publisher,
-                "year": year,
-                "publication_date": publication_date,
-                "pages": pages,
+                "publish_year": publish_year,
+                "publication_date": formatted_date,
+                "pages": pages_num,
                 "EAN": EAN,
                 "summary": summary
             }
@@ -73,6 +110,7 @@ if __name__ == "__main__":
             record["metadata"] = metadata
 
             upsert_to_pinecone(record)
-        except:
-            pass
+        except Exception as e: 
+            print(f'Summary is not exist: {len(result_links)}')
+            continue
 

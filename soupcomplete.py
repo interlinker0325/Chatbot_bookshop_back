@@ -1,75 +1,116 @@
-import requests
-from bs4 import BeautifulSoup
 import json
+from openai import OpenAI
+import numpy as np
+from pinecone import Pinecone
+import os
+from dotenv import load_dotenv
+import uuid
+from datetime import datetime
 
-with open('res.json') as res_file:
-    res_links = json.load(res_file)
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-new_link = "https://www.lafeltrinelli.it/"
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 
-book_num = 1
+pc_index = pc.Index(host=os.getenv("PINECONE_INDEX_NAME"))
 
-res = []
-for res_link in res_links:
-    book_link = new_link + res_link
-    print(book_link)
+with open('cleaned_data.json', encoding='utf-8') as file:
+    result_links = json.load(file)
 
-    try:
-        page = requests.get(book_link)
+def get_embeddings(query):
+    response = client.embeddings.create(
+        input=query,
+        model="text-embedding-3-small"
+    )
+    embedding = response.data[0].embedding
+    
+    return embedding
+def upsert_to_pinecone(record):
+    unique_id = str(uuid.uuid4())
+    pc_index.upsert(
+        vectors=[
+            {
+                "id": unique_id,
+                "values": record['value'],
+                "metadata": record["metadata"]
+            }
+        ],
+        namespace="book_shop"
+    )
 
-        result = []
+if __name__ == "__main__":
+    print("Starting upsert process...", len(result_links))
+    for index, book in enumerate(result_links):
+        print(index)
+        try:
+            title = book.get("title", " ")
 
-        if page.status_code == 200:
-            soup = BeautifulSoup(page.content, "html.parser")
+            review = book.get("review", " ")
+            review_str = review.split(":")[1].split("\n")[0].strip() if ":" in review else "0"
+            review_num = int(review_str) if review_str.isdigit() else 0
 
-            title = soup.find("h1", class_="cc-title").get_text()
-            review = soup.find("div", class_="cc-content-reviews").find("span").get_text()
-            price = soup.find("div", class_="cc-buy-box-info").find("div",class_="cc-content-price").find("span", class_="cc-price").get_text()
-            print(price)
-            summary = soup.find("div", class_="cc-em-content-body").find("div").get_text()
-            cleaned_summary = summary.strip()
-            # cleaned_summary = " ".join(cleaned_summary.split())
+            price = book.get("price", " ")
+            price_str = price.split(" ")[0].strip().replace(",", ".") if price else "0.0"
+            price_num = float(price_str)
+            formatted_price = f"{price_num:.2f}"
 
-            result.append({
+            summary = book["summary"]
+            author = book.get("Autore:", " ")
+            author_list = [name.strip() for name in author.split(",")] if author else []
+
+            publisher = book.get("Editore:", " ")
+            publish_year = book.get("Anno edizione:", " ")
+
+            publication_date = book.get("In commercio dal:", "")
+            month_mapping = {
+                "gennaio": "01",
+                "febbraio": "02",
+                "marzo": "03",
+                "aprile": "04",
+                "maggio": "05",
+                "giugno": "06",
+                "luglio": "07",
+                "agosto": "08",
+                "settembre": "09",
+                "ottobre": "10",
+                "novembre": "11",
+                "dicembre": "12"
+            }
+            try:
+                day, month, year = publication_date.split()
+                month_number = month_mapping[month]
+                formatted_date = f"{year}-{month_number}-{day.zfill(2)}"
+            except: 
+                formatted_date = " "
+
+            pages = book.get("Pagine:", " ")
+            number_str = pages.split()[0] if pages else "0"
+            pages_num = int(number_str) if number_str.isdigit() else 0
+
+            EAN = book.get("EAN:", " ")
+
+            metadata =  {
                 "title": title,
-                "review": review,
-                "price": price,
-                "summary": cleaned_summary,
-            })
+                "author": author_list,
+                "review": review_num,
+                "price": formatted_price,
+                "publisher": publisher,
+                "publish_year": publish_year,
+                "publication_date": formatted_date,
+                "pages": pages_num,
+                "EAN": EAN,
+                "summary": summary
+            }
             
-            contents = soup.find("div", class_="cc-em-row")
-            
-            new_contents = contents.find_all("div", class_="cc-em-col")
 
-            index_data_pairs = []
+            embedding = get_embeddings(summary)
 
-            for second_contents in new_contents:
-                second_content = second_contents.find_all("div", class_="cc-item")
-                for datas in second_content:
-                    index = datas.find("div", class_="cc-content-label").find("span").get_text()
-                    data = datas.find("div", class_="cc-content-value").find("span").get_text()
-                    print(index, data)
-                    index_data_pairs.append({index: data})
+            record = {}
+            record["value"] = embedding
+            record["metadata"] = metadata
 
-            result.extend(index_data_pairs)
-            print("result",result)
-
-            with open(f"result{book_num}.json", encoding='utf-8') as file:
-                total_data = json.load(file)
-
-            if len(total_data) > 10000 and book_num != 4:
-                book_num += 1
-
-                with open(f"result{book_num}.json", "r") as file:
-                    total_data = json.load(file)
-                    
-            total_data.append(result)
-
-            with open(f"result{book_num}.json", "w", encoding='utf-8') as file:
-                json.dump(total_data, file, indent=4, ensure_ascii=False)
-
-        else:
-            print("Failed to retrieve the webpage.")
-    except:
-        pass
+            upsert_to_pinecone(record)
+        except Exception as e: 
+            print(f'Summary is not exist: {len(result_links)}')
+            continue
 
