@@ -1,3 +1,16 @@
-/venv/
 .gitignore
+/venv/
+/cleandata/
 .env
+cleaned_data.json
+affilate_new_cleaned_data.json
+affilate_merged_data.json
+affilate_filtered.json
+cheaned_data.json
+finally_result1.json
+finally_result2.json
+finally_result3.json
+new_result.json
+reserch_data.json
+test1.json
+

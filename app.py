@@ -40,4 +40,3 @@ with open("book_links.json", "w") as file:
     json.dump(book_links, file)
 
 time.sleep(10)
-
