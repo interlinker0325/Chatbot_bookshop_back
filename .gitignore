@@ -1,7 +1,6 @@
 .gitignore
 /venv/
 /cleandata/
-.env
 cleaned_data.json
 affilate_new_cleaned_data.json
 affilate_merged_data.json
@@ -14,3 +13,5 @@ new_result.json
 reserch_data.json
 test1.json
 
+config.bat
+node_modules
